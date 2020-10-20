@@ -46,6 +46,10 @@ def get_posts(
     if 'pages' in kwargs:
         kwargs['page_limit'] = kwargs.pop('pages')
 
+    #Proxies usage with requests
+    if "proxies" in kwargs:
+        _scraper.requests_kwargs['proxies'] = kwargs.pop("proxies")
+
     # TODO: Deprecate `extra_info` in favor of `options`
     extra_info = kwargs.pop('extra_info', False)
     if extra_info:

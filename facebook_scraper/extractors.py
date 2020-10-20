@@ -80,6 +80,8 @@ class PostExtractor:
             'shares': None,
             'post_url': None,
             'link': None,
+            'cta_text': None,
+            'cta_url': None
         }
 
     def extract_post(self) -> Post:
@@ -97,6 +99,8 @@ class PostExtractor:
             self.extract_link,
             self.extract_video,
             self.extract_video_thumbnail,
+            self.extract_cta_text,
+            self.extract_cta_url
         ]
 
         post = self.make_new_post()
@@ -132,57 +136,28 @@ class PostExtractor:
     def extract_post_id(self) -> PartialPost:
         return {'post_id': self.data_ft.get('mf_story_key')}
 
-    # TODO: this method needs test for the 'has more' case and shared content
     def extract_text(self) -> PartialPost:
-        # Open this article individually because not all content is fully loaded when skimming
-        # through pages.
-        # This ensures the full content can be read.
-
         element = self.element
-
-        has_more = self.more_url_regex.search(element.html)
-        if has_more:
-            match = self.post_story_regex.search(element.html)
-            if match:
-                url = utils.urljoin(FB_MOBILE_BASE_URL, match.groups()[0].replace("&amp;", "&"))
-                response = self.request(url)
-                element = response.html.find('.story_body_container', first=True)
-
-        nodes = element.find('p, header')
-        if nodes:
-            post_text = []
-            shared_text = []
-            ended = False
-            for node in nodes[1:]:
-                if node.tag == 'header':
-                    ended = True
-
-                # Remove '... More'
-                # This button is meant to display the hidden text that is already loaded
-                # Not to be confused with the 'More' that opens the article in a new page
-                if node.tag == 'p':
-                    node = utils.make_html_element(
-                        html=node.html.replace('>… <', '><', 1).replace('>More<', '', 1)
-                    )
-
-                if not ended:
-                    post_text.append(node.text)
-                else:
-                    shared_text.append(node.text)
-
-            # Separation between paragraphs
-            paragraph_separator = '\n\n'
-
-            text = paragraph_separator.join(itertools.chain(post_text, shared_text))
-            post_text = paragraph_separator.join(post_text)
-            shared_text = paragraph_separator.join(shared_text)
+        text_nodes = element.find('p')
+        clean = re.compile(r'<.*?>')
+        try:
+            end_nodes = element.find('header')[1:]
+        except:
+            end_nodes = None
+        if text_nodes:
+            cleaned_post_text = re.sub(clean, '', " ".join([node.html for node in text_nodes]))
+            post_text = re.sub(r"\s\s+", " ", cleaned_post_text)
+            if end_nodes:
+                cleaned_shared_text = re.sub(clean, '', " ".join([node.html for node in end_nodes]))
+                shared_text = re.sub(r"\s\s+", " ", cleaned_shared_text)
+            else:
+                shared_text = ''
 
             return {
-                'text': text,
+                'text': post_text + shared_text,
                 'post_text': post_text,
                 'shared_text': shared_text,
             }
-
         return None
 
     # TODO: Add the correct timezone
@@ -388,6 +363,22 @@ class PostExtractor:
         for bad_json in bad_jsons:
             good_json = self.bad_json_key_regex.sub(r'\g<prefix>"\g<key>":', bad_json)
             yield json.loads(good_json)
+
+    def extract_cta_text(self):
+        ad_element = self.data_ft.get("call_to_action_type", None)
+        if not ad_element:
+            return {"cta_text": None}
+        else:
+            return {"cta_text": ad_element.lower().replace("_", " ")}
+
+    def extract_cta_url(self):
+        ad_url = self.element.xpath(
+            '//a[contains (@data-sigil, "MLynx_asynclazy")]/button/../@href', first=True
+        )
+        if not ad_url:
+            return {"cta_url": None}
+        else:
+            return {"cta_url": utils.unquote(ad_url)}
 
     @property
     def data_ft(self) -> dict:
